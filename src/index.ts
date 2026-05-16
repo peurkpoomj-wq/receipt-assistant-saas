@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import webhookRouter from './routes/webhook';
 import adminRouter from './routes/admin';
+import oauthRouter from './routes/oauth';
 import { buildLegacyTenant, ensureHeaderRow } from './services/sheets.service';
 import { logger } from './utils/logger';
 
@@ -32,8 +33,7 @@ app.get('/health', (_req: Request, res: Response) => {
 // Multi-tenant webhook: POST /webhook/:tenantId
 // Legacy single-tenant: POST /webhook  (maps to tenantId = 'legacy')
 app.use('/webhook', webhookRouter);
-
-// Admin / registration panel
+app.use('/oauth', oauthRouter);
 app.use('/', adminRouter);
 
 // ─── Global Error Handler ──────────────────────────────────────────────────────
