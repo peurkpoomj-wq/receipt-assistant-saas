@@ -8,8 +8,7 @@ const HEADERS = [
   'Merchant',
   'Amount (THB)',
   'Category',
-  'Expense Type',
-  'Tour Group',
+  'Cost Center',
   'LINE Message ID',
   'Recorded At',
 ];
@@ -35,15 +34,14 @@ export async function appendReceiptRow(row: SheetRow, tenant: Tenant): Promise<v
     row.merchant_name,
     row.total_amount,
     row.category,
-    row.expense_type,
-    row.tour_group,
+    row.cost_center,
     row.line_message_id,
     row.recorded_at,
   ]];
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: tenant.spreadsheet_id,
-    range: `${tenant.sheet_name}!A:H`,
+    range: `${tenant.sheet_name}!A:G`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values },
   });
@@ -60,13 +58,13 @@ export async function ensureHeaderRow(tenant: Tenant): Promise<void> {
 
   const existing = await sheets.spreadsheets.values.get({
     spreadsheetId: tenant.spreadsheet_id,
-    range: `${tenant.sheet_name}!A1:H1`,
+    range: `${tenant.sheet_name}!A1:G1`,
   });
 
   if (!existing.data.values?.length) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: tenant.spreadsheet_id,
-      range: `${tenant.sheet_name}!A1:H1`,
+      range: `${tenant.sheet_name}!A1:G1`,
       valueInputOption: 'RAW',
       requestBody: { values: [HEADERS] },
     });
@@ -91,7 +89,9 @@ export function buildLegacyTenant(): Tenant | null {
     google_oauth_refresh_token: refresh,
     spreadsheet_id: spreadsheet,
     sheet_name: process.env.GOOGLE_SHEET_NAME ?? 'Expenses',
-    tour_groups: ['กรุ๊ปญี่ปุ่น', 'กรุ๊ปเกาหลี', 'กรุ๊ปยุโรป', 'กรุ๊ปจีน', 'กรุ๊ปออสเตรเลีย'],
+    cost_centers: process.env.COST_CENTERS
+      ? process.env.COST_CENTERS.split(',').map(s => s.trim()).filter(Boolean)
+      : ['ทั่วไป', 'แผนกขาย', 'แผนกการตลาด', 'แผนกปฏิบัติการ', 'แผนกบัญชี'],
     plan: 'business',
     monthly_receipt_count: 0,
     monthly_reset_at: new Date().toISOString(),

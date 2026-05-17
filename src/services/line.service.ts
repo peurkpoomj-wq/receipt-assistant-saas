@@ -47,11 +47,16 @@ export async function replyText(
   });
 }
 
-// ─── Flex Message: Tour Group Selector ────────────────────────────────────────
+// ─── Flex Message: Cost Center Selector ───────────────────────────────────────
 
-export async function replyFlexTourGroupSelector(
+export async function replyFlexCostCenterSelector(
   replyToken: string,
-  summary: { merchant: string; amount: number; category: string; messageId?: string },
+  summary: {
+    merchant: string;
+    amount: number;
+    category: string;
+    messageId?: string;
+  },
   tenant: Tenant
 ): Promise<void> {
   const amountFormatted = summary.amount.toLocaleString('th-TH', {
@@ -63,16 +68,16 @@ export async function replyFlexTourGroupSelector(
     ? `&msgId=${encodeURIComponent(summary.messageId)}`
     : '';
 
-  const buttons = tenant.tour_groups.map(
-    (group): messagingApi.FlexButton => ({
+  const buttons = tenant.cost_centers.map(
+    (center): messagingApi.FlexButton => ({
       type: 'button',
       style: 'primary',
       height: 'sm',
       action: {
         type: 'postback',
-        label: group,
-        data: `action=select_tour&group=${encodeURIComponent(group)}${msgParam}`,
-        displayText: `เลือก: ${group}`,
+        label: center,
+        data: `action=select_cost_center&center=${encodeURIComponent(center)}${msgParam}`,
+        displayText: `เลือก: ${center}`,
       },
     })
   );
@@ -88,7 +93,7 @@ export async function replyFlexTourGroupSelector(
       contents: [
         {
           type: 'text',
-          text: 'ค่าใช้จ่ายกรุ๊ปทัวร์',
+          text: '📂 เลือก Cost Center',
           weight: 'bold',
           size: 'lg',
           color: '#FFFFFF',
@@ -125,7 +130,7 @@ export async function replyFlexTourGroupSelector(
         { type: 'separator', margin: 'md' },
         {
           type: 'text',
-          text: 'ค่าใช้จ่ายนี้เป็นของกรุ๊ปทัวร์ไหน?',
+          text: 'ค่าใช้จ่ายนี้อยู่ใน Cost Center ไหน?',
           size: 'sm',
           margin: 'md',
           wrap: true,
@@ -147,7 +152,7 @@ export async function replyFlexTourGroupSelector(
     messages: [
       {
         type: 'flex',
-        altText: `ค่าใช้จ่ายกรุ๊ปทัวร์: ${summary.merchant} ฿${amountFormatted}`,
+        altText: `เลือก Cost Center: ${summary.merchant} ฿${amountFormatted}`,
         contents: bubble,
       },
     ],
@@ -162,8 +167,7 @@ export async function pushConfirmation(
     merchant: string;
     amount: number;
     category: string;
-    expenseType: string;
-    tourGroup?: string;
+    costCenter: string;
   },
   tenant: Tenant
 ): Promise<void> {
@@ -171,14 +175,13 @@ export async function pushConfirmation(
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-  const tourLine = data.tourGroup ? `\n   กรุ๊ป : ${data.tourGroup}` : '';
   const text = [
     '✅ บันทึกรายจ่ายเรียบร้อยแล้ว!',
     '─────────────────────',
-    `   ร้าน : ${data.merchant}`,
-    `   ยอด  : ฿${amountFormatted}`,
-    `   หมวด : ${data.category}`,
-    `   ประเภท: ${data.expenseType}${tourLine}`,
+    `   ร้าน       : ${data.merchant}`,
+    `   ยอด        : ฿${amountFormatted}`,
+    `   หมวด       : ${data.category}`,
+    `   Cost Center: ${data.costCenter}`,
   ].join('\n');
 
   await getClient(tenant).pushMessage({

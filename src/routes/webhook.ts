@@ -5,11 +5,11 @@ import type { PendingReceipt, SheetRow, Tenant } from '../types';
 import {
   downloadLineImage,
   replyText,
-  replyFlexTourGroupSelector,
+  replyFlexCostCenterSelector,
   pushConfirmation,
 } from '../services/line.service';
 import { extractReceiptData } from '../services/vision.service';
-import { appendReceiptRow, ensureHeaderRow } from '../services/sheets.service';
+import { appendReceiptRow } from '../services/sheets.service';
 import { getTenantById, incrementReceiptCount } from '../db/tenants.repo';
 import { buildLegacyTenant } from '../services/sheets.service';
 import { logger } from '../utils/logger';
@@ -44,13 +44,11 @@ function verifySignature(rawBody: string, signature: string, secret: string): bo
 // ─── Resolve Tenant ────────────────────────────────────────────────────────────
 
 async function resolveTenant(tenantId: string): Promise<Tenant | null> {
-  // "legacy" = single-tenant mode via env vars (backward compat)
   if (tenantId === 'legacy') {
     return buildLegacyTenant();
   }
 
   try {
-    // Check Supabase only if configured
     if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
       return await getTenantById(tenantId);
     }
@@ -93,7 +91,12 @@ async function handleImageMessage(event: WebhookEvent, tenant: Tenant): Promise<
     return;
   }
 
-  logger.info('Receipt extracted', { messageId, merchant: receipt.merchant_name, amount: receipt.total_amount, type: receipt.expense_type, error: receipt.error });
+  logger.info('Receipt extracted', {
+    messageId,
+    merchant: receipt.merchant_name,
+    amount: receipt.total_amount,
+    error: receipt.error,
+  });
 
   if (receipt.error) {
     await replyText(
@@ -104,56 +107,56 @@ async function handleImageMessage(event: WebhookEvent, tenant: Tenant): Promise<
     return;
   }
 
-  // Group_Tour → ask user to pick tour group
-  if (receipt.expense_type === 'Group_Tour') {
-    const pendingKey = `${tenant.id}:${userId}:${messageId}`;
-    pendingReceipts.set(pendingKey, {
-      receipt,
-      imageMessageId: messageId,
-      createdAt: Date.now(),
-    });
-    logger.info('Pending Group_Tour', { pendingKey, merchant: receipt.merchant_name });
+  const costCenters = tenant.cost_centers;
 
-    await replyFlexTourGroupSelector(
+  // Auto-save if only 1 cost center configured
+  if (costCenters.length === 1) {
+    const row: SheetRow = {
+      date: receipt.date,
+      merchant_name: receipt.merchant_name,
+      total_amount: receipt.total_amount,
+      category: receipt.category,
+      cost_center: costCenters[0],
+      line_message_id: messageId,
+      recorded_at: new Date().toISOString(),
+    };
+    try {
+      await appendReceiptRow(row, tenant);
+      await incrementReceiptCount(tenant.id).catch(() => {});
+    } catch (err) {
+      logger.error('Sheets write failed', { err, merchant: row.merchant_name });
+      await replyText(replyToken, `อ่านสลิปได้แล้ว แต่บันทึก Sheet ไม่สำเร็จ\nร้าน: ${receipt.merchant_name} ฿${receipt.total_amount}`, tenant).catch(() => {});
+      return;
+    }
+    await replyText(
       replyToken,
-      { merchant: receipt.merchant_name, amount: receipt.total_amount, category: receipt.category, messageId },
+      [
+        '✅ บันทึกรายจ่ายเรียบร้อยแล้ว!',
+        '─────────────────────',
+        `   ร้าน       : ${receipt.merchant_name}`,
+        `   ยอด        : ฿${receipt.total_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}`,
+        `   หมวด       : ${receipt.category}`,
+        `   Cost Center: ${costCenters[0]}`,
+      ].join('\n'),
       tenant
-    ).catch((err) => logger.error('Flex send failed', { err }));
+    ).catch((err) => logger.warn('Reply token expired', { err }));
     return;
   }
 
-  // Office → write to Sheets immediately
-  const row: SheetRow = {
-    date: receipt.date,
-    merchant_name: receipt.merchant_name,
-    total_amount: receipt.total_amount,
-    category: receipt.category,
-    expense_type: receipt.expense_type,
-    tour_group: '',
-    line_message_id: messageId,
-    recorded_at: new Date().toISOString(),
-  };
+  // Multiple cost centers → ask user to pick
+  const pendingKey = `${tenant.id}:${userId}:${messageId}`;
+  pendingReceipts.set(pendingKey, {
+    receipt,
+    imageMessageId: messageId,
+    createdAt: Date.now(),
+  });
+  logger.info('Pending receipt, awaiting cost center', { pendingKey, merchant: receipt.merchant_name });
 
-  try {
-    await appendReceiptRow(row, tenant);
-    await incrementReceiptCount(tenant.id).catch(() => {});
-  } catch (err) {
-    logger.error('Sheets write failed', { err, merchant: row.merchant_name });
-    await replyText(replyToken, `อ่านสลิปได้แล้ว แต่บันทึก Sheet ไม่สำเร็จ\nร้าน: ${receipt.merchant_name} ฿${receipt.total_amount}`, tenant).catch(() => {});
-    return;
-  }
-
-  await replyText(
+  await replyFlexCostCenterSelector(
     replyToken,
-    [
-      '✅ บันทึกรายจ่ายเรียบร้อยแล้ว!',
-      '─────────────────────',
-      `   ร้าน : ${receipt.merchant_name}`,
-      `   ยอด  : ฿${receipt.total_amount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}`,
-      `   หมวด : ${receipt.category}`,
-    ].join('\n'),
+    { merchant: receipt.merchant_name, amount: receipt.total_amount, category: receipt.category, messageId },
     tenant
-  ).catch((err) => logger.warn('Reply token expired', { err }));
+  ).catch((err) => logger.error('Flex send failed', { err }));
 }
 
 async function handlePostback(event: WebhookEvent, tenant: Tenant): Promise<void> {
@@ -162,12 +165,12 @@ async function handlePostback(event: WebhookEvent, tenant: Tenant): Promise<void
   const userId = event.source.userId ?? 'unknown';
   const params = new URLSearchParams(event.postback.data);
 
-  if (params.get('action') !== 'select_tour') return;
+  if (params.get('action') !== 'select_cost_center') return;
 
-  const tourGroup = decodeURIComponent(params.get('group') ?? '');
+  const costCenter = decodeURIComponent(params.get('center') ?? '');
   const messageId = params.get('msgId') ?? '';
 
-  // Find pending receipt (specific key first, then any for this user)
+  // Find pending receipt (specific key first, then any for this user+tenant)
   const specificKey = `${tenant.id}:${userId}:${messageId}`;
   let pendingKey = pendingReceipts.has(specificKey) ? specificKey : undefined;
 
@@ -193,8 +196,7 @@ async function handlePostback(event: WebhookEvent, tenant: Tenant): Promise<void
     merchant_name: receipt.merchant_name,
     total_amount: receipt.total_amount,
     category: receipt.category,
-    expense_type: receipt.expense_type,
-    tour_group: tourGroup,
+    cost_center: costCenter,
     line_message_id: imageMessageId,
     recorded_at: new Date().toISOString(),
   };
@@ -212,8 +214,7 @@ async function handlePostback(event: WebhookEvent, tenant: Tenant): Promise<void
     merchant: receipt.merchant_name,
     amount: receipt.total_amount,
     category: receipt.category,
-    expenseType: receipt.expense_type,
-    tourGroup,
+    costCenter,
   }, tenant);
 }
 
@@ -227,7 +228,6 @@ router.post('/:tenantId?', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Missing X-Line-Signature' });
   }
 
-  // Resolve tenant
   const tenant = await resolveTenant(tenantId);
   if (!tenant) {
     logger.warn('Unknown tenant', { tenantId });

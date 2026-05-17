@@ -1,5 +1,5 @@
 import { getSupabase } from './supabase';
-import { Tenant, DEFAULT_TOUR_GROUPS } from '../types';
+import { Tenant, DEFAULT_COST_CENTERS } from '../types';
 import { logger } from '../utils/logger';
 
 export async function getTenantById(id: string): Promise<Tenant | null> {
@@ -16,7 +16,13 @@ export async function getTenantById(id: string): Promise<Tenant | null> {
     throw error;
   }
 
-  return data as Tenant;
+  // Map DB column tour_groups → cost_centers (until DB migration is applied)
+  const raw = data as any;
+  if (raw.tour_groups !== undefined && raw.cost_centers === undefined) {
+    raw.cost_centers = raw.tour_groups;
+  }
+
+  return raw as Tenant;
 }
 
 export async function getAllActiveTenants(): Promise<Tenant[]> {
@@ -30,7 +36,13 @@ export async function getAllActiveTenants(): Promise<Tenant[]> {
     throw error;
   }
 
-  return (data ?? []) as Tenant[];
+  // Map DB column tour_groups → cost_centers for each tenant
+  return ((data ?? []) as any[]).map(raw => {
+    if (raw.tour_groups !== undefined && raw.cost_centers === undefined) {
+      raw.cost_centers = raw.tour_groups;
+    }
+    return raw as Tenant;
+  });
 }
 
 export async function createTenant(input: {
@@ -42,7 +54,7 @@ export async function createTenant(input: {
   google_oauth_refresh_token: string;
   spreadsheet_id: string;
   sheet_name?: string;
-  tour_groups?: string[];
+  cost_centers?: string[];
   plan?: Tenant['plan'];
 }): Promise<Tenant> {
   const { data, error } = await getSupabase()
@@ -56,7 +68,7 @@ export async function createTenant(input: {
       google_oauth_refresh_token: input.google_oauth_refresh_token,
       spreadsheet_id: input.spreadsheet_id,
       sheet_name: input.sheet_name ?? 'Expenses',
-      tour_groups: input.tour_groups ?? [...DEFAULT_TOUR_GROUPS],
+      tour_groups: input.cost_centers ?? [...DEFAULT_COST_CENTERS], // DB column is still tour_groups
       plan: input.plan ?? 'free',
       monthly_receipt_count: 0,
       monthly_reset_at: new Date().toISOString(),
@@ -71,7 +83,13 @@ export async function createTenant(input: {
   }
 
   logger.info('Tenant created', { id: data.id, name: input.name });
-  return data as Tenant;
+
+  // Map tour_groups → cost_centers in the returned object
+  const raw = data as any;
+  if (raw.tour_groups !== undefined && raw.cost_centers === undefined) {
+    raw.cost_centers = raw.tour_groups;
+  }
+  return raw as Tenant;
 }
 
 export async function incrementReceiptCount(tenantId: string): Promise<void> {
@@ -89,9 +107,16 @@ export async function updateTenant(
   id: string,
   updates: Partial<Omit<Tenant, 'id' | 'created_at'>>
 ): Promise<void> {
+  // Map cost_centers → tour_groups for DB write (until migration applied)
+  const dbUpdates: any = { ...updates };
+  if (dbUpdates.cost_centers !== undefined) {
+    dbUpdates.tour_groups = dbUpdates.cost_centers;
+    delete dbUpdates.cost_centers;
+  }
+
   const { error } = await getSupabase()
     .from('tenants')
-    .update(updates)
+    .update(dbUpdates)
     .eq('id', id);
 
   if (error) {

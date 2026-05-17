@@ -4,7 +4,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { createTenant, getAllActiveTenants, updateTenant } from '../db/tenants.repo';
-import { DEFAULT_TOUR_GROUPS, Tenant } from '../types';
+import { DEFAULT_COST_CENTERS, Tenant } from '../types';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -35,7 +35,7 @@ router.post('/tenants', async (req: Request, res: Response) => {
     line_channel_secret,
     line_channel_access_token,
     spreadsheet_id,
-    tour_groups_raw,
+    cost_centers_raw,
   } = req.body;
 
   const missing = ['name', 'line_channel_secret', 'line_channel_access_token', 'spreadsheet_id'].filter(k => !req.body[k]);
@@ -43,10 +43,10 @@ router.post('/tenants', async (req: Request, res: Response) => {
     return res.status(400).json({ error: `กรุณากรอกให้ครบ: ${missing.join(', ')}` });
   }
 
-  // parse tour groups จาก textarea (แต่ละบรรทัด = 1 กรุ๊ป)
-  const tour_groups = tour_groups_raw
-    ? (tour_groups_raw as string).split('\n').map((s: string) => s.trim()).filter(Boolean)
-    : [...DEFAULT_TOUR_GROUPS];
+  // parse cost centers จาก textarea (แต่ละบรรทัด = 1 cost center)
+  const cost_centers = cost_centers_raw
+    ? (cost_centers_raw as string).split('\n').map((s: string) => s.trim()).filter(Boolean)
+    : [...DEFAULT_COST_CENTERS];
 
   try {
     const tenant = await createTenant({
@@ -59,7 +59,7 @@ router.post('/tenants', async (req: Request, res: Response) => {
       google_oauth_refresh_token: 'PENDING', // จะได้จาก OAuth flow
       spreadsheet_id,
       sheet_name: 'Expenses',
-      tour_groups,
+      cost_centers,
       plan: 'free',
     });
 
@@ -94,7 +94,7 @@ router.get('/tenants', requireAdmin, async (_req: Request, res: Response) => {
 });
 
 router.patch('/tenants/:id', requireAdmin, async (req: Request, res: Response) => {
-  const allowed = ['plan', 'is_active', 'sheet_name', 'tour_groups'];
+  const allowed = ['plan', 'is_active', 'sheet_name', 'cost_centers'];
   const updates: any = {};
   for (const k of allowed) if (req.body[k] !== undefined) updates[k] = req.body[k];
   await updateTenant(req.params.id, updates);
@@ -206,12 +206,12 @@ const REGISTER_HTML = `<!DOCTYPE html>
       <div class="hint-box">อยู่ที่ <strong>Messaging API → Channel access token</strong> → กด Issue ถ้ายังไม่มี</div>
     </div>
 
-    <div class="section-title">🗂️ ชื่อกรุ๊ปทัวร์ (ถ้ามี)</div>
+    <div class="section-title">🗂️ Cost Centers (แผนก/โครงการ)</div>
 
     <div class="field-group">
-      <label>รายชื่อกรุ๊ปทัวร์ <span class="label-sub">ไม่บังคับ</span></label>
-      <textarea name="tour_groups_raw" placeholder="กรุ๊ปญี่ปุ่น&#10;กรุ๊ปเกาหลี&#10;กรุ๊ปยุโรป&#10;กรุ๊ปจีน"></textarea>
-      <div class="tour-group-hint">ใส่ชื่อกรุ๊ปละ 1 บรรทัด ถ้าว่างจะใช้ค่าเริ่มต้น</div>
+      <label>รายชื่อ Cost Centers <span class="label-sub">ไม่บังคับ</span></label>
+      <textarea name="cost_centers_raw" placeholder="แผนกขาย&#10;แผนกการตลาด&#10;แผนกปฏิบัติการ&#10;โครงการ A&#10;ทั่วไป"></textarea>
+      <div class="tour-group-hint">ใส่ชื่อ Cost Center ละ 1 บรรทัด — บอทจะถามทุกครั้งที่บันทึกใบเสร็จ ถ้าว่างจะใช้ค่าเริ่มต้น</div>
     </div>
 
     <button type="submit" class="btn-submit" id="btn">
