@@ -1,7 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../utils/logger';
-// ws polyfill for Node.js < 22 (no native WebSocket)
+
+// Polyfill WebSocket for Node.js < 22 (required by @supabase/realtime-js)
 import WebSocket from 'ws';
+if (!(globalThis as any).WebSocket) {
+  (globalThis as any).WebSocket = WebSocket;
+}
 
 let _client: SupabaseClient | null = null;
 
@@ -17,9 +21,6 @@ export function getSupabase(): SupabaseClient {
 
   _client = createClient(url, key, {
     auth: { persistSession: false },
-    realtime: {
-      transport: WebSocket as any,
-    },
   });
 
   logger.info('Supabase client initialized');
